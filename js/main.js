@@ -1,357 +1,328 @@
-//wrapping everything in a self-executing anonymous function to move to local scope
 (function(){
 
 //pseudo-global variables
-var keyArray = ["Electricity consumption in kWh","Carbon dioxide emission in Mt","Electricity from fossil fuels","Electricity from nuclear fuels","Electricity from hydroelectric plants","Electricity from other renewable sources"];
-var expressed = keyArray[0];//initial attribute
-
-window.onload = initialize(); //start script once HTML is loaded
-
-function initialize(){ //the first function called once the html is loaded
-	setMap();
-};
-
-function setMap(){ //set choropleth map parameters	
-	//map frame dimensions
-	var width = 860;
-	var height = 500;
-	
-	//create a title for the page
-	 var title = d3.select("body")
-	 	.append("h1")
-	 	.text("Electricity Consumption and Carbon Dioxide Emission Per Person in European Union Countries");
-	
-	//create a new svg element with the above dimensions
-	var map = d3.select("body")
-		.append("svg")
-		.attr("width", width)
-		.attr("height", height)
-		.attr("class", "map");
-	
-	//create Europe albers equal area conic projection, centered on Germany
-	var projection = d3.geo.albers()
-		.center([-10, 52])
-		.rotate([-20, 0])
-		.parallels([43, 62])
-		.scale(800)
-		.translate([width / 2, height / 2]);
-	
-	//create svg path generator using the projection
-	var path = d3.geo.path()
-		.projection(projection);
-
-	//create graticule generator
-    var graticule = d3.geo.graticule()
-		.step([30, 30]); //place graticule lines every 30 degrees of longitude and latitude
-	
-	//create graticule background
-	var gratBackground = map.append("path")
-		.datum(graticule.outline) //bind graticule background
-		.attr("class", "gratBackground") //assign class for styling
-		.attr("d", path) //project graticule
-	
-	//create graticule lines	
-	var gratLines = map.selectAll(".gratLines") //select graticule elements that will be created
-		.data(graticule.lines) //bind graticule lines to each element to be created
-	  	.enter() //create an element for each datum
-		.append("path") //append each element to the svg as a path element
-		.attr("class", "gratLines") //assign class for styling
-		.attr("d", path); //project graticule lines
-
-	queue() //use queue.js to parallelize asynchronous data loading for cpu efficiency
-		.defer(d3.csv, "data/lab2Data.csv") //load attributes data from csv
-		.defer(d3.json, "data/countries.topojson") //load geometry from countries topojson
-		.defer(d3.json, "data/euNations.topojson") //load geometry from nations topojson
-		.await(callback);
-
-	//create callback to use variables later
-    function callback(error, csvData, countriesData, euData){
-		
-		var recolorMap = colorScale(csvData); //retrieve color scale generator
-
-		//variables for csv to json data transfer
-		var jsonRegions = euData.objects.euNations.geometries;
-			
-		//loop through csv data to assign each csv region's values to json region properties
-		for (var i=0; i<csvData.length; i++) {		
-			var csvRegion = csvData[i]; //the current region's attributes
-			var csvAdm0 = csvRegion.adm0_code; //adm0 code
-			
-			//loop through json regions to assign csv data to the right region
-			for (var a=0; a<jsonRegions.length; a++){
-				
-				//where adm0 codes match, attach csv data to json object
-				if (jsonRegions[a].properties.adm0_code == csvAdm0){
-					
-					//one more for loop to assign all key/value pairs to json object
-					for (var key in keyArray){
-						var attr = keyArray[key];
-						var val = parseFloat(csvRegion[attr]);
-						jsonRegions[a].properties[attr] = val;
-					};
-					
-					jsonRegions[a].properties.name = csvRegion.name; //set prop
-					break; //stop looking through the json regions
-				};
-			};
-		};
-
-		//add Europe countries geometry to map			
-		var countries = map.append("path") //create SVG path element
-			.datum(topojson.feature(countriesData, countriesData.objects.countries)) //bind countries data to path element
-			.attr("class", "countries") //assign class for styling countries
-			.attr("d", path); //project data as geometry in svg
-
-		//add regions to map as enumeration units colored by data
-		var regions = map.selectAll(".regions")
-			.data(topojson.feature(euData, euData.objects.euNations).features) //bind regions data to path element
-			.enter() //create elements
-			.append("path") //append elements to svg
-			.attr("class", "regions") //assign class for additional styling
-			.attr("id", function(d) { return d.properties.adm0_code })
-			.attr("d", path) //project data as geometry in svg
-			.style("fill", function(d) { //color enumeration units
-				return choropleth(d, recolorMap);
-			})
-			.on("mouseover", highlight)
-			.on("mouseout", dehighlight)
-			.on("mousemove", moveLabel)
-			.append("desc") //append the current color
-				.text(function(d) {
-					return choropleth(d, recolorMap);
-				});
-
-		createDropdown(csvData); //create the dropdown menu
-        
-        //add coordinated visualization to the map
-        setChart(csvData, colorScale);
-        
-	};
-};
-
-function createDropdown(csvData){
-	//add a select element for the dropdown menu
-	var dropdown = d3.select("body")
-		.append("div")
-		.attr("class","dropdown") //for positioning menu with css
-		.html("<h3>Select Attribute:</h3>")
-		.append("select")
-		.on("change", function(){ changeAttribute(this.value, csvData) }); //changes expressed attribute
-	
-	//create each option element within the dropdown
-	dropdown.selectAll("options")
-		.data(keyArray)
-		.enter()
-		.append("option")
-		.attr("value", function(d){ return d })
-		.text(function(d) {
-			d = d[0].toUpperCase() + d.substring(1,3) + d.substring(3);
-			return d
-		});
-};
-
-function colorScale(csvData){
-
-	//create quantile classes with color scale		
-	var color = d3.scale.quantile() //designate quantile scale generator
-		.range([
-			"#00CE42",
-			"#3BD500",
-			"#7ED900",
-			"#C2DD00",
-			"#E57600",
-		]);
-	
-	//build array of all currently expressed values for input domain
-	var domainArray = [];
-	for (var i in csvData){
-		domainArray.push(Number(csvData[i][expressed]));
-	};
-
-	//for quantile scale, pass array of expressed values as domain
-	color.domain(domainArray);
-	
-	return color; //return the color scale generator
-};
+var attrArray = ["Net_Generation", "Net_Summer_Capacity", "Average_Retail_Price", "Total_Retail_Sales","Carbon_Dioxide_Emission"]; //list of attributes
+var expressed = attrArray[0]; //initial attribute
+var pie, arc, labelArc,chartTitle,colorScale;
 
 
-function choropleth(d, recolorMap){
-	
-	//get data value
-	var value = d.properties[expressed];
-	//if value exists, assign it a color; otherwise assign gray
-	if (value) {
-		return recolorMap(value); //recolorMap holds the colorScale generator
-	} else {
-		return "#ccc";
-	};
-};
+//begin script when window loads
+window.onload = setMap();
+window.onload = donut(expressed);
 
-function changeAttribute(attribute, csvData){
-	//change the expressed attribute
-	expressed = attribute;
-	
-	//recolor the map
-	d3.selectAll(".regions") //select every region
-        .transition()
-        .duration(1000)
-		.style("fill", function(d) { //color enumeration units
-			return choropleth(d, colorScale(csvData)); //->
-		})
-		.select("desc") //replace the color text in each region's desc element
-			.text(function(d) {
-				return choropleth(d, colorScale(csvData)); //->
-			});
-};
+//set up choropleth map
+function setMap(){
 
-function format(value){
-	
-	//format the value's display according to the attribute
-	if (expressed != "Population"){
-		value = "$"+roundRight(value);
-	} else {
-		value = roundRight(value);
-	};
-	
-	return value;
-};
-
-function roundRight(number){
-	
-	if (number>=100){
-		var num = Math.round(number);
-		return num.toLocaleString();
-	} else if (number<100 && number>=10){
-		return number.toPrecision(4);
-	} else if (number<10 && number>=1){
-		return number.toPrecision(3);
-	} else if (number<1){
-		return number.toPrecision(2);
-	};
-};
-
-function highlight(data){
-	
-	var props = data.properties; //json properties
-
-	d3.select("#"+props.adm0_code) //select the current region in the DOM
-		.style("fill", "#000"); //set the enumeration unit fill to black
-
-	var labelAttribute = "<h1>"+props[expressed]+
-		"</h1><br><b>"+expressed+"</b>"; //label content
-	var labelName = props.name //html string for name to go in child div
-	
-	//create info label div
-	var infolabel = d3.select("body")
-		.append("div") //create the label div
-		.attr("class", "infolabel")
-		.attr("id", props.adm0_code+"label") //for styling label
-		.html(labelAttribute) //add text
-		.append("div") //add child div for feature name
-		.attr("class", "labelname") //for styling name
-		.html(labelName); //add feature name to label
-};
-
-function dehighlight(data){
-	
-	var props = data.properties; //json properties
-	var region = d3.select("#"+props.adm0_code); //select the current region
-	var fillcolor = region.select("desc").text(); //access original color from desc
-	region.style("fill", fillcolor); //reset enumeration unit to orginal color
-	
-	d3.select("#"+props.adm0_code+"label").remove(); //remove info label
-};
-
-function moveLabel() {
-	
-	var x = d3.event.clientX+10; //horizontal label coordinate based mouse position stored in d3.event
-	var y = d3.event.clientY-75; //vertical label coordinate
-	d3.select(".infolabel") //select the label div for moving
-		.style("margin-left", x+"px") //reposition label horizontal
-		.style("margin-top", y+"px"); //reposition label vertical
-};
-
-//function to create coordinated bar chart
-function setChart(csvData, colorScale){
-    //chart frame dimensions
-    var chartWidth = 860,
-        chartHeight = 500,
-        leftPadding = 55,
-        rightPadding = 25,
-        topBottomPadding = 25,
-        chartInnerWidth = chartWidth - leftPadding - rightPadding,
-        chartInnerHeight = chartHeight - topBottomPadding * 2,
-        translate = "translate(" + leftPadding + "," + topBottomPadding + ")";
-
-    //create a second svg element to hold the bar chart
-    var chart = d3.select("body")
-        .append("svg")
-        .attr("width", chartWidth)
-        .attr("height", chartHeight)
-        .attr("class", "chart");
-
-
-
-    //create a scale to size bars proportionally to frame and for axis
-    var yScale = d3.scale.linear()
-        .range([463, 0])
-        .domain([0, 15000]);
-
-    //set bars for each country
-    var bars = chart.selectAll(".bars")
-        .data(csvData)
-        .enter()
-        .append("rect")
-        .sort(function(a, b){
-            return b[expressed]-a[expressed]
-        })
-        .attr("class", function(d){
-            return "bars " + d.adm0_code;
-        })
-        .attr("width", chartInnerWidth / csvData.length - 1)
-        .attr("x", function(d, i){
-            return i * (chartInnerWidth / csvData.length) + leftPadding;
-        })
-        .attr("height", function(d, i){
-            return 463 - yScale(parseFloat(d[expressed]));
-        })
-        .attr("y", function(d, i){
-            return yScale(parseFloat(d[expressed])) + topBottomPadding;
-        })
-
-    //create a text element for the chart title
-    var chartTitle = chart.append("text")
-        .attr("x", 120)
-        .attr("y", 40)
-        .attr("class", "chartTitle")
-        .text("Amount of attribute in each country");
-
-    //create vertical axis generator
-    var yAxis = d3.svg.axis()
-        .scale(yScale)
-        .orient("left");
-
-    //place axis
-    var axis = chart.append("g")
-        .attr("class", "axis")
-        .attr("transform", translate)
-        .call(yAxis);
-
-
-};
+  //map frame dimensions
+   var width = 700,
+       height = 400;
     
-//function to create color scale generator
+    //create a title for the page
+   var title = d3.select("body")
+       .append("h1")
+       .attr("class","main-title")
+       .text("State Electricity Profiles");
+
+   //create new svg container for the map
+   var map = d3.select("body")
+       .append("svg")
+       .attr("class", "map")
+       .attr("width", width)
+       .attr("height", height);
+
+   //create Albers equal area conic projection centered on United States
+       var projection = d3.geoAlbers()
+        .center([0, 43.5])
+        .rotate([98, 4, 0])
+        .parallels([45.00, 45.5])
+        .scale(800)
+        .translate([width / 2, height / 2]);
+
+       var path = d3.geoPath()
+        .projection(projection);
+
+    //use d3.queue to parallelize asynchronous data loading
+    d3.queue()
+        .defer(d3.csv, "data/lab2Data.csv") //load attributes from csv
+        .defer(d3.json, "data/StatesTopo.topojson") //load spatial data
+        .await(callback);
+
+    function callback(error, csvData, usa){
+
+            setGraticule(map,path)
+
+            // translate topojson to GeoJSON
+            var unitedStates = topojson.feature(usa, usa.objects.StatesTopo).features;
+
+
+            //join csv data to GeoJSON enumeration units
+            unitedStates = joinData(unitedStates, csvData);
+
+            // make color
+             colorScale = makeColorScale(csvData);
+
+            setEnumerationUnits(unitedStates, map, path, colorScale);
+            createDropdown(csvData);
+
+
+
+
+    };
+};
+
+
+//donut function
+function donut(expressed){
+
+  var width = 570 ,
+      height = 570 ,
+      radius = width/2;
+
+   arc = d3.arc()
+      .innerRadius(120)
+      .outerRadius(180);
+
+   labelArc = d3.arc()
+      .outerRadius(200)
+      .innerRadius(180);
+
+    pie = d3.pie()
+      .value(function(d){
+          return d[expressed];
+      });
+
+
+  var svg = d3.select("body")
+      .append("svg")
+      .attr("class", "chart")
+      .attr("width", width)
+      .attr("height", height)
+      .append("g")
+      .attr("transform", "translate("+ width/2 +","+ height/2 +")");
+
+
+  var lines =   svg.append("g")
+  	.attr("class", "lines");
+
+  var labels = svg.append("g")
+  	.attr("class", "labels");
+
+
+  //import data
+  d3.csv("data/lab2Data.csv", function(error, data){
+      if (error) throw error;
+
+      //parse data
+      data.forEach(function(d){
+          d.Average_Retail_Price = +d[expressed];
+          d.State = d.State;
+      });
+
+      //append g elements (arc)
+      var g = svg.selectAll(".arc")
+          .data(pie(data))
+          .enter().append("g")
+          .attr("class", "arc");
+
+      var colorScale = makeColorScale(data);
+
+
+      //append path of the arc
+      var arcPath = g.append("path")
+          .attr("d", arc)
+          .attr("class", function(d){
+
+              return "arc " + d.data.State.replace(/ /g, "_");
+          });
+
+          arcPath.style("fill",function(d){ return choropleth(d.data, colorScale);})
+          .on("mouseover", function(d){
+                    highlight(d.data);
+                })
+          .on("mouseout", function(d){
+           dehighlight(d.data);
+             })
+          .on("mousemove", moveLabel)
+
+          .transition()
+          .ease(d3.easeExp)
+          .duration(2000)
+          .attrTween("d", pieTween);
+
+
+        g.append("text")
+               .transition()
+               .delay(2000)
+              .ease(d3.easeLinear)
+              .duration(500)
+              .attr("transform", function(d) {
+              var midAngle = d.endAngle < Math.PI ? d.startAngle/2 + d.endAngle/2 : d.startAngle/2  + d.endAngle/2 + Math.PI ;
+              return "translate(" + labelArc.centroid(d)[0] + "," + labelArc.centroid(d)[1] + ") rotate(-90) rotate(" + (midAngle * 180/Math.PI) + ")"; })
+              .attr("dy", ".35em")
+              .attr('text-anchor',function(midAngle){
+                var anchorLocation = midAngle["endAngle"] < Math.PI ? "start" : "end"
+                return anchorLocation
+              })
+              .text(function(d) {return (d.data.State+": "+Math.round(d.data[expressed]));});
+
+                if (expressed == attrArray[0]){
+                  chartTitle = "Net Generation (MWh) per capita"
+                  chartTitle2 = ""
+                }
+                else if (expressed == attrArray[1]){
+                  chartTitle = "Net Summer Capacity (GW)"
+                  chartTitle2 = ""
+                }
+                else if (expressed == attrArray[2]){
+                  chartTitle = "Average Retail Price (cents/kWh)"
+                  chartTitle2 = ""
+                }
+                else if (expressed == attrArray[3]){
+                  chartTitle = "Total Retail Sales (MWh) per capita"
+                  chartTitle2= ""
+                }
+                else if (expressed == attrArray[4]){
+                  chartTitle = "Carbon Dioxide Emission per capita in metric tons"
+                  chartTitle2= ""
+                };
+
+
+
+              svg.append("text")
+              .attr("x", 0)
+              .attr("y", 15 )
+              .attr("text-anchor", "middle")
+              .style("font-size", "60px")
+              .style("font-weight","bold")
+              .html("2019");
+
+
+          var desc = arcPath.append("desc")
+          .text(function(d){
+
+              var fill = choropleth(d.data, colorScale)
+              return '{"fill":"'+fill+'"}';
+          });
+
+          var title = d3.select("body")
+          .append("div")
+          .attr("class","large-title")
+          .attr("style","max-width:700px")
+          .html("<h1>"+chartTitle+" " + chartTitle2 +"</h1>");
+
+
+
+  })
+
+  function pieTween(b) {
+    b.innerRadius = 0;
+    var i = d3.interpolate({startAngle: 0, endAngle: 0}, b);
+    return function(t) {return arc(i(t));};
+  };
+
+};
+
+function setGraticule(map,path){
+  //create graticule generator
+   var graticule = d3.geoGraticule()
+       .step([25, 25]); //place graticule lines every 30 degrees of longitude and latitude
+
+   //create graticule lines
+   var gratLines = map.selectAll(".gratLines") //select graticule elements that will be created
+       .data(graticule.lines()) //bind graticule lines to each element to be created
+       .enter() //create an element for each datum
+       .append("path") //append each element to the svg as a path element
+       .attr("class", "gratLines") //assign class for styling
+       .attr("d", path); //project graticule lines
+};
+
+function joinData(states, csvData){
+  //loop through csv to assign each set of csv attribute values to geojson region
+  for (var i=0; i<csvData.length; i++){
+      var csvRegion = csvData[i]; //the current region
+      var csvKey = csvRegion.State; //the CSV primary key
+
+      //loop through geojson regions to find correct region
+      for (var a=0; a<states.length; a++){
+
+          var geojsonProps = states[a].properties; //the current region geojson properties
+          var geojsonKey = geojsonProps.name; //the geojson primary key
+
+          //where primary keys match, transfer csv data to geojson properties object
+          if (geojsonKey == csvKey){
+
+              //assign all attributes and values
+              attrArray.forEach(function(attr){
+                  var val = parseFloat(csvRegion[attr]); //get csv attribute value
+                  geojsonProps[attr] = val; //assign attribute and value to geojson properties
+              });
+          };
+      };
+  };
+
+    return states;
+};
+
+function choropleth(props, colorScale){
+    //make sure attribute value is a number
+
+    var val = parseFloat(props[expressed]);
+    //if attribute value exists, assign a color; otherwise assign gray
+    if (typeof val == 'number' && !isNaN(val)){
+        return colorScale(val);
+    } else {
+
+        return "#CCC";
+    };
+};
+
+function setEnumerationUnits(unitedStates, map, path, colorScale){
+  var states = map.selectAll(".states")
+  .data(unitedStates)
+  .enter()
+  .append("path")
+  .attr("class", function(d){
+      stateName = d.properties.name;
+      return "states " + d.properties.name.replace(/ /g, "_");
+  })
+  .attr("d", path)
+  .style("fill", function(d){
+    return choropleth(d.properties,colorScale);
+  })
+  .on("mouseover", function(d){
+            highlight(d.properties);
+        })
+  .on("mouseout", function(d){
+           dehighlight(d.properties);
+       })
+  .on("mousemove", moveLabel);
+   var desc = states.append("desc")
+   .text(function(d){
+
+       var fill = choropleth(d.properties, colorScale)
+       return '{"fill":"'+fill+'"}';
+   });
+
+   var sources = d3.select("body")
+      .append("div")
+      .attr("class","source")
+      .html("<span>Data Source: U.S. Energy Information Administration - Independent Statistics & Analysis<br><br>Abbreviations: kWh (kilowatt-hour), MWh (megawatt-hour), GW (gigawatt), Mt (metric ton)</span>")
+
+
+};
+
 function makeColorScale(data){
     var colorClasses = [
-        "#D4B9DA",
-        "#C994C7",
-        "#DF65B0",
-        "#DD1C77",
-        "#980043"
+        "#fef0d9",
+        "#fdcc8a",
+        "#fc8d59",
+        "#e34a33",
+        "#b30000"
     ];
 
+
     //create color scale generator
-    var colorScale = d3.scaleQuantile()
+    var colorScale = d3.scaleThreshold()
         .range(colorClasses);
 
     //build array of all values of the expressed attribute
@@ -361,10 +332,192 @@ function makeColorScale(data){
         domainArray.push(val);
     };
 
-    //assign array of expressed values as scale domain
+    //cluster data using ckmeans clustering algorithm to create natural breaks
+    var clusters = ss.ckmeans(domainArray, 5);
+    //reset domain array to cluster minimums
+    domainArray = clusters.map(function(d){
+        return d3.min(d);
+    });
+    //remove first value from domain array to create class breakpoints
+    domainArray.shift();
+
+    //assign array of last 4 cluster minimums as domain
     colorScale.domain(domainArray);
 
     return colorScale;
-};    
-    
+};
+
+//function to create a dropdown menu for attribute selection
+function createDropdown(csvData){
+    //add select element
+    var dropdown = d3.select("body")
+        .append("select")
+        .attr("class", "dropdown")
+        .on("change", function(){
+            changeAttribute(this.value,csvData)
+        });
+
+    //add attribute name options
+    var attrOptions = dropdown.selectAll("attrOptions")
+        .data(attrArray)
+        .enter()
+        .append("option")
+        .attr("value", function(d){ return d })
+        .text(function(d){ return d })
+        .text(function(d){
+          if (d == attrArray[0]){
+            dropMenu = "Net Generation (MWh)"
+            return dropMenu
+          }
+          else if (d == attrArray[1]){
+            dropMenu = "Net Summer Capacity (GW)"
+            return dropMenu
+          }
+          else if (d == attrArray[2]){
+            dropMenu = "Average Retail Price (cents/kWh)"
+            return dropMenu
+          }
+          else if (d == attrArray[3]){
+            dropMenu = "Total Retail Sales (MWh)"
+            return dropMenu
+          }
+          else if (d == attrArray[4]){
+            dropMenu = "Carbon Dioxide Emission (Mt)"
+            return dropMenu
+          };
+        });
+};
+
+//dropdown change listener handler
+function changeAttribute(attribute, csvData){
+    //change the expressed attribute
+    expressed = attribute;
+
+    //recreate the color scale
+    var colorScale = makeColorScale(csvData);
+
+    //recolor enumeration units
+    var states = d3.selectAll(".states")
+        .transition()
+        .duration(1000)
+        .style("fill", function(d){
+            return choropleth(d.properties, colorScale)
+        });
+
+    var desc = states.select("desc")
+    .text(function(d){
+
+        var fill = choropleth(d.properties, colorScale)
+        return '{"fill":"'+fill+'"}';
+    });
+
+    var removeArcs = d3.select(".chart").remove();
+
+    d3.select(".large-title").remove();
+
+    donut(expressed)
+
+
+};
+
+function highlight(props){
+    //change stroke
+    var selected = d3.selectAll("." + props.State.replace(/ /g, "_"))
+        .style("fill", "yellow")
+        .style("stroke", "black")
+        .style("stroke-width", "3");
+
+        setLabel(props);
+};
+
+
+//function to reset the element style on mouseout
+function dehighlight(props){
+    var selected = d3.selectAll("." + props.State.replace(/ /g, "_"))
+        .style("fill", function(){
+            return getStyle(this, "fill")
+        })
+        .style("stroke", function(){
+            return getStyle(this, "stroke")
+        })
+        .style("stroke-width", function(){
+            return getStyle(this, "stroke-width")
+        });
+
+    function getStyle(element, styleName){
+
+        var styleText = d3.select(element)
+            .select("desc")
+            .text();
+
+        var styleObject = JSON.parse(styleText);
+
+        return styleObject[styleName];
+    };
+    d3.select(".infolabel")
+       .remove();
+};
+
+//function to create dynamic label
+function setLabel(props){
+
+  if (expressed == attrArray[0]){
+    labelTitle = "Net Generation (MWh)"
+  }
+  else if (expressed == attrArray[1]){
+    labelTitle = "Net Summer Capacity (GW)"
+  }
+  else if (expressed == attrArray[2]){
+    labelTitle = "Average Retail Price (cents/kWh)"
+  }
+  else if (expressed == attrArray[3]){
+    labelTitle = "Total Retail Sales (MWh)"
+  }
+  else if (expressed == attrArray[4]){
+    labelTitle = "Carbon Dioxide Emission (Mt)"
+  };
+    //label content
+    var labelAttribute = "<h1>" + Math.round(props[expressed]) +
+        "</h1><b>" + labelTitle + "</b>";
+
+
+    //create info label div
+    var infolabel = d3.select("body")
+        .append("div")
+        .attr("class", "infolabel")
+        .attr("id", props.State + "_label")
+        .html(labelAttribute);
+
+    var regionName = infolabel.append("div")
+        .attr("class", "labelname")
+        .html(props.State);
+
+};
+
+//function to move info label with mouse
+function moveLabel(){
+    //get width of label
+    var labelWidth = d3.select(".infolabel")
+        .node()
+        .getBoundingClientRect()
+        .width;
+
+    //use coordinates of mousemove event to set label coordinates
+    var x1 = d3.event.clientX + 10,
+        y1 = d3.event.clientY - 75,
+        x2 = d3.event.clientX - labelWidth - 10,
+        y2 = d3.event.clientY + 25;
+
+    //horizontal label coordinate, testing for overflow
+    var x = d3.event.clientX > window.innerWidth - labelWidth - 20 ? x2 : x1;
+    //vertical label coordinate, testing for overflow
+    var y = d3.event.clientY < 75 ? y2 : y1;
+
+    d3.select(".infolabel")
+        .style("left", x + "px")
+        .style("top", y + "px");
+};
+
+
+
 })();
