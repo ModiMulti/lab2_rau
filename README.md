@@ -1,2 +1,2 @@
 # lab2_rau
-Coordinated Visualization w/ D3
+State Electricity Profiles - a Coordinated Visualization w/ D3
