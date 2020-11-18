@@ -1,4 +1,4 @@
-// donut labels tutorial 1
+//donut labels tutorial 1
 function donut(){
   var data = [{
     label: 'Star Wars',

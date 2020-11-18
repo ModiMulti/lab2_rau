@@ -1,7 +1,8 @@
+//wrapping everything in a self-executing anonymous function to move to local scope
 (function(){
 
 //pseudo-global variables
-var attrArray = ["Net_Generation", "Net_Summer_Capacity", "Average_Retail_Price", "Total_Retail_Sales","Carbon_Dioxide_Emission"]; //list of attributes
+var attrArray = ["Net_Generation", "Net_Summer_Capacity", "Average_Retail_Price", "Total_Retail_Sales", "Carbon_Dioxide_Emission"]; //list of attributes
 var expressed = attrArray[0]; //initial attribute
 var pie, arc, labelArc,chartTitle,colorScale;
 
@@ -13,11 +14,11 @@ window.onload = donut(expressed);
 //set up choropleth map
 function setMap(){
 
-  //map frame dimensions
+   //map frame dimensions
    var width = 700,
        height = 400;
     
-    //create a title for the page
+   //create a title for the page
    var title = d3.select("body")
        .append("h1")
        .attr("class","main-title")
@@ -30,7 +31,7 @@ function setMap(){
        .attr("width", width)
        .attr("height", height);
 
-   //create Albers equal area conic projection centered on United States
+       //create Albers equal area conic projection centered on United States
        var projection = d3.geoAlbers()
         .center([0, 43.5])
         .rotate([98, 4, 0])
@@ -38,30 +39,35 @@ function setMap(){
         .scale(800)
         .translate([width / 2, height / 2]);
 
+       //create svg path generator using the projection
        var path = d3.geoPath()
         .projection(projection);
 
     //use d3.queue to parallelize asynchronous data loading
     d3.queue()
-        .defer(d3.csv, "data/lab2Data.csv") //load attributes from csv
+        .defer(d3.csv, "data/Lab2Data.csv") //load attributes from csv
         .defer(d3.json, "data/StatesTopo.topojson") //load spatial data
         .await(callback);
 
+    //create callback to use variables later
     function callback(error, csvData, usa){
 
+            //place graticule on the map
             setGraticule(map,path)
 
-            // translate topojson to GeoJSON
+            //translate topojson to GeoJSON
             var unitedStates = topojson.feature(usa, usa.objects.StatesTopo).features;
 
 
             //join csv data to GeoJSON enumeration units
             unitedStates = joinData(unitedStates, csvData);
 
-            // make color
+             //create the color scale
              colorScale = makeColorScale(csvData);
-
+            
+            //add enumeration units to the map
             setEnumerationUnits(unitedStates, map, path, colorScale);
+            //create the dropdown menu
             createDropdown(csvData);
 
 
@@ -108,11 +114,11 @@ function donut(expressed){
   	.attr("class", "labels");
 
 
-  //import data
-  d3.csv("data/lab2Data.csv", function(error, data){
+  //importing data
+  d3.csv("data/Lab2Data.csv", function(error, data){
       if (error) throw error;
 
-      //parse data
+      //parsing data
       data.forEach(function(d){
           d.Average_Retail_Price = +d[expressed];
           d.State = d.State;
@@ -213,7 +219,7 @@ function donut(expressed){
 
 
   })
-
+  //function to interpolate the arcs in data space
   function pieTween(b) {
     b.innerRadius = 0;
     var i = d3.interpolate({startAngle: 0, endAngle: 0}, b);
@@ -222,10 +228,11 @@ function donut(expressed){
 
 };
 
+//function for creating background graticule
 function setGraticule(map,path){
   //create graticule generator
    var graticule = d3.geoGraticule()
-       .step([25, 25]); //place graticule lines every 30 degrees of longitude and latitude
+       .step([25, 25]); //place graticule lines every 25 degrees of longitude and latitude
 
    //create graticule lines
    var gratLines = map.selectAll(".gratLines") //select graticule elements that will be created
@@ -236,6 +243,7 @@ function setGraticule(map,path){
        .attr("d", path); //project graticule lines
 };
 
+//loops used to accomplish the csv to geojson attribute data transfer
 function joinData(states, csvData){
   //loop through csv to assign each set of csv attribute values to geojson region
   for (var i=0; i<csvData.length; i++){
@@ -263,9 +271,10 @@ function joinData(states, csvData){
     return states;
 };
 
+//function to test for data value and return color
 function choropleth(props, colorScale){
+   
     //make sure attribute value is a number
-
     var val = parseFloat(props[expressed]);
     //if attribute value exists, assign a color; otherwise assign gray
     if (typeof val == 'number' && !isNaN(val)){
@@ -276,6 +285,7 @@ function choropleth(props, colorScale){
     };
 };
 
+//adding enumeration units to the map
 function setEnumerationUnits(unitedStates, map, path, colorScale){
   var states = map.selectAll(".states")
   .data(unitedStates)
@@ -311,6 +321,7 @@ function setEnumerationUnits(unitedStates, map, path, colorScale){
 
 };
 
+//function to create color scale generator
 function makeColorScale(data){
     var colorClasses = [
         "#fef0d9",
@@ -420,6 +431,7 @@ function changeAttribute(attribute, csvData){
 
 };
 
+//function to highlight enumeration units
 function highlight(props){
     //change stroke
     var selected = d3.selectAll("." + props.State.replace(/ /g, "_"))
@@ -454,6 +466,7 @@ function dehighlight(props){
 
         return styleObject[styleName];
     };
+    //remove info label
     d3.select(".infolabel")
        .remove();
 };
@@ -520,4 +533,4 @@ function moveLabel(){
 
 
 
-})();
+})();//last line of main.js
